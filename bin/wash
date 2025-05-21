@@ -1,0 +1,384 @@
+#!/bin/sh
+#///////////////////////////////////////////////////////////////////////////////////////////////////
+# Copyright (c) 2018 Alex Li (alex.l.li@outlook.com).
+# 
+# Licensed under the MIT License (the "License"); you may not use this file except in compliance 
+# with the License. 
+# 
+# You may obtain a copy of the License at https://opensource.org/license/mit.
+# 
+# Unless required by applicable law or agreed to in writing, software distributed under the License
+# is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express 
+# or implied. 
+# 
+# See the License for the specific language governing permissions and limitations under the License.
+#
+# File: bin/wash
+# Author: Alex Li(alex.l.li@outlook.com)
+# Date: 2017/12/14 11:33:23
+#///////////////////////////////////////////////////////////////////////////////////////////////////
+
+FLAG_INFO_GREP_SUMMARY=false
+
+#EXCLUDE_PATTERN="\.git|\.svn|\.dat:|\.txt:|\.ini:|\.swp:|cscope\.out:|tags:|_build"
+EXCLUDE_PATTERN="\.git|\.svn|\.dat$|\.txt$|\.ini$|\.swp$|cscope\.out$|tags$|_build"
+
+function WashCount() {
+    local _directory=$1
+    if [ -z "$_directory" ]; then
+        _directory="."
+    fi
+
+    find $_directory -type f -exec wc -l {} + | egrep -v "$EXCLUDE_PATTERN" | awk '
+        $NF != "total" { 
+            sum += $1; 
+            printf "%7d %s\n", $1, $2; 
+        } 
+        END { 
+            printf "%7d %s\n", sum, "total" 
+        }
+        '
+}
+
+function WashDiffEdit() {
+    dir_left=$1
+    dir_right=$2
+
+    for line in $(diff -r $dir_left $dir_right | egrep "^diff" | awk '{ print $3 "===" $4; }');
+    do
+	    vimdiff `echo $line | awk -F'===' '{ print $1" "$2;}'`
+
+        _continue_edit=yes
+        while true
+        do
+            _ask=no
+            read -p "Continue[Yes/No] ? " answer
+            case X$answer in
+                XYes|Xyes|Xy|XY|X)
+                    ;;
+                XNo|Xno|Xn|XN)
+                    _continue_edit=no
+                    ;;
+                *)
+                    _ask=yes
+                    ;;
+            esac
+
+            if [ "X$_ask" != "Xyes" ]; then
+                break
+            fi
+        done
+
+        if [ X$_continue_edit = Xno ]; then
+            break
+        fi
+    done
+}
+
+function WashGrep() {
+	local keyword="$1"
+    local extra_params=
+
+    if [ X"$2" != X ]; then
+        extra_params="$extra_params --include $2"
+    fi
+
+	egrep -I $extra_params -e "$keyword" -r . | egrep -v "$EXCLUDE_PATTERN"
+}
+
+function WashGrepEdit() {
+    local grep_type=$1
+	local keyword="$2"
+    local extra_params=
+
+    if [ X$grep_type = X"invert" ]; then
+        extra_params="$extra_params -L"
+    else
+        extra_params="$extra_params -l"
+    fi
+
+    if [ X"$3" != X ]; then
+        extra_params="$extra_params --include $3"
+        #vim `egrep -I $extra_params -e "$keyword" -r . | egrep -v "\.git|\.svn|\.swp$|cscope\.out$|tags$" | sort -u`  -o
+        vim `egrep -I $extra_params -e "$keyword" -r . | egrep -v "$EXCLUDE_PATTERN" | sort -u`  -o
+
+        if [ $? -ne 0 ]; then
+# TODO(alex): fix error message problem
+# This error message is for egrep in vim command, it doesn't work now.
+#
+            cat <<-EOF
+A file-name glob can use *, ?, and [...]  as wildcards, and \ to quote a wildcard or backslash character literally.
+EOF
+        fi
+    else
+	    vim `egrep -I $extra_params -e "$keyword" -r . | egrep -v "$EXCLUDE_PATTERN" | sort -u`  -o
+    fi
+}
+
+# Count of files which contains the given pattern
+function WashGrepCount() {
+    WashGrep $* | cut -d: -f1 | sort -u |  cut -d/ -f2 | uniq -c
+}
+
+function WashFindClass() {
+    #WashGrep 'class\s*.*:\s*.*{' '*.h' | awk -F: '{ print $2" "$3;}' | awk '{print "Inherit: "$2 "->" $4 ": "$3; print "Subclass: "$4 "<-" $2 ":"$3; }'
+    #WashGrep 'class\s*.*:\s*.*{' '*.h' | awk -F: '{ print $2" "$3 " "$1;}' | awk '{print $2 "->" $4 ": "$3 " "$6; print $4 "<-" $2 ": "$3 " "$6; }' | sort -u
+    WashGrep 'class\s*.*:\s*.*{' '*.h' | awk -F: '{ print $2" "$3 " "$1;}' | awk '{print $2 "->" $4 ": "$3 " "$6; print $4 "<-" $2 ": "$3 " "$6; }' | sort -u
+}
+
+# Find files of the given pattern
+function WashFindFile() {
+	local _pattern="$1"
+	local _directory=$2
+
+    if [ -z "$_directory" ]; then
+        _directory=.
+    fi
+
+	find $_directory -name "$_pattern"
+    return $?
+}
+
+function WashFindEdit() {
+	file="$1"
+	vim `find . -name "$file"` -o
+}
+
+# Find lines 
+#
+function WashFindLongLines() {
+    local _width=$1
+    local _directory=$2
+
+    if [ -z "$_directory" ]; then
+        _directory=.
+    fi
+
+    if [ -z "$_width" ]; then
+        _width=100
+    fi
+
+    _width=$(( $_width + 1 ))
+
+    find $_directory -type f | egrep -v "$EXCLUDE_PATTERN" |  xargs grep -Hn "^.\{${_width},\}"
+    return $?
+}
+
+function WashFindUnusedSymbols() {
+    # Extract imported symbols
+    for file in $(WashFindFile '*');
+    do
+        IMPORTS=$(awk '
+        /^import/ {
+            gsub(/[{};,]/, " ")
+            for (i=2; i<=NF; i++) {
+                if ($i == "from") break
+                if ($i ~ /^[A-Za-z]/) print $i
+            }
+        }' $file | sort -u)
+        
+        # Find unused symbols
+        for symbol in $IMPORTS; do
+            if ! grep -q -E "(^|[^a-zA-Z0-9_])${symbol}([^a-zA-Z0-9_]|$)" $file; then
+                echo "$file: $symbol"
+            fi
+        done
+    done
+}
+
+function WashFindRoutine() {
+    local _subcmd=$1
+
+    case $_subcmd in
+        class)
+            shift 1
+            WashFindClass
+            return $?
+            ;;
+        file)
+            shift 1
+            WashFindFile "$@"
+            return $?
+            ;;
+        import)
+            return 0
+            ;;
+        long)
+            shift 1
+            WashFindLongLines "$@"
+            return $?
+            ;;
+        orphan)
+            return 0
+            ;;
+        unused)
+            shift 1
+            WashFindUnusedSymbols
+            return 0
+            ;;
+        include)
+			WashGrep "^#include.*\"" | cut -d: -f2 | sort -u
+            return $?
+            ;;
+        *)
+            ;;
+    esac
+
+    while getopts sh opt
+    do
+        case $opt in
+            s)
+                FLAG_INFO_GREP_SUMMARY=true
+                ;;
+            *)
+			    ;;
+        esac
+    done
+    shift $[$OPTIND-1]
+
+    if [ ${FLAG_INFO_GREP_SUMMARY} = true ]; then
+        WashGrepCount $1
+    else
+        WashGrep $*
+    fi
+
+    return $?
+}
+
+function WashOpen() {
+    return 0
+}
+
+function WashWash() {
+    if [ X$1 = X"grep" -a X$2 = X"invert" ]; then
+        shift 2
+        WashGrepEdit invert "$@"
+    elif [ X$1 = X"grep" ]; then
+        WashGrepEdit "$@"
+    elif [ X$1 = X"invert" ]; then
+        WashGrepEdit "$@"
+    else
+        WashGrepEdit grep "$@"
+    fi
+
+    return 0
+}
+
+function WashUsage() {
+    cat  <<-EOF
+
+$(basename $0) - Wash wash sleep
+ 
+USAGE
+
+    $(basename $0) COMMAND [OPTIONS] ...
+    
+COMMAND
+
+    count
+
+        Count total lines under current directory
+
+    diff dir1 dir2
+
+        Edit all diff files in dir1 and dir2 one by one
+
+    find [SUBCOMMAND]
+
+        Find files with specified filename pattern to edit
+
+        class [DIRECTORY]           List all classes declared in files of the current directory
+
+        import(TBD)                 Print the list of imported files
+
+        include                     Print the list of included files 
+
+        long [WIDTH] [DIRECTORY]    Find lines longer than the specified WIDTH and DIRECTORY
+
+        orphan(TBD)                 Find orphan files those that are not linked or referenced by others
+
+        unused [edit](TBD)          Find unused import symbols. If edit is provided, open files one by one and highlight the unused imports
+
+        file [PATTERN]              Find files of the specified name pattern
+
+	    [PATTERN]                   Find files containing the specified pattern
+
+            -s                      Print count summary containing the given pattern
+
+    grep [invert] PATTERN [FILE_PATTERN]
+    invert PATTERN [FILE_PATTERN]
+    PATTERN [FILE_PATTERN]
+
+        Find files containing the specified grep pattern to edit. 
+
+        FILE_PATTERN specify the filename pattern to be included in search. Please quotes pattern using 
+        single quotes to prevent shell path name expansion.
+
+        If invert if provided, it will search files that not contains the specified pattern to edit.
+
+EOF
+}
+
+function mainloop() {
+	COMMAND=$1
+    if [ -z "$COMMAND" ]; then
+        WashUsage
+        return 0
+    fi
+
+	case $COMMAND in
+        count)
+            shift 1
+            WashCount "$@"
+            return $?
+            ;;
+		find)
+            shift 1
+            WashFindRoutine "$@"
+            return $?
+			;;
+		diff)
+			WashDiffEdit $2 $3
+            return $?
+			;;
+        help)
+            WashUsage
+            return 0
+            ;;
+        open)
+            WashUsage
+            return $?
+            ;;
+		grep|invert)
+			;;
+		*)
+			;;
+	esac
+
+    while getopts h opt
+    do
+        case $opt in
+            h|*)
+                WashUsage
+                return 1
+			    ;;
+        esac
+    done
+    shift $[$OPTIND-1]
+
+    WashWash "$@"
+	return $?
+}
+
+
+mainloop "$@"
+exit $?
+
+
+
+
+
+
+
+
+# vim: set expandtab ts=4 sw=4 sts=4 tw=100:
