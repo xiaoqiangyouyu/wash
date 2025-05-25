@@ -20,9 +20,24 @@
 
 FLAG_INFO_GREP_SUMMARY=false
 
-#EXCLUDE_PATTERN="\.git|\.svn|\.dat:|\.txt:|\.ini:|\.swp:|cscope\.out:|tags:|_build"
-EXCLUDE_PATTERN="\.git|\.svn|\.dat$|\.txt$|\.ini$|\.swp$|cscope\.out$|tags$|_build"
+EXCLUDE_PATTERN="\.git|\.svn|\.dat$|\.txt$|\.ini$|\.swp$|cscope\.out$|tags$|TAGS$|_build"
+EDITOR=vim
+WASH_EDITOR="/Applications/Visual\ Studio\ Code.app/Contents/Frameworks/Code\ Helper.app/Contents/MacOS/Code\ Helper"
 
+
+function WashGrep() {
+	local keyword="$1"
+    local extra_params=
+
+    if [ X"$2" != X ]; then
+        extra_params="$extra_params --include $2"
+    fi
+
+	egrep -n -I $extra_params -e "$keyword" -r . | egrep -v "$EXCLUDE_PATTERN"
+}
+
+# Count lines in the given directory
+#
 function WashCount() {
     local _directory=$1
     if [ -z "$_directory" ]; then
@@ -40,7 +55,9 @@ function WashCount() {
         '
 }
 
-function WashDiffEdit() {
+# Compare directory side by side and edit diff files pair by pair using vim
+#
+function WashDiff() {
     dir_left=$1
     dir_right=$2
 
@@ -75,18 +92,7 @@ function WashDiffEdit() {
     done
 }
 
-function WashGrep() {
-	local keyword="$1"
-    local extra_params=
-
-    if [ X"$2" != X ]; then
-        extra_params="$extra_params --include $2"
-    fi
-
-	egrep -I $extra_params -e "$keyword" -r . | egrep -v "$EXCLUDE_PATTERN"
-}
-
-function WashGrepEdit() {
+function WashEdit() {
     local grep_type=$1
 	local keyword="$2"
     local extra_params=
@@ -99,7 +105,6 @@ function WashGrepEdit() {
 
     if [ X"$3" != X ]; then
         extra_params="$extra_params --include $3"
-        #vim `egrep -I $extra_params -e "$keyword" -r . | egrep -v "\.git|\.svn|\.swp$|cscope\.out$|tags$" | sort -u`  -o
         vim `egrep -I $extra_params -e "$keyword" -r . | egrep -v "$EXCLUDE_PATTERN" | sort -u`  -o
 
         if [ $? -ne 0 ]; then
@@ -115,15 +120,18 @@ EOF
     fi
 }
 
+function WashFind() {
+    WashGrep "$@"
+    return $?
+}
+
 # Count of files which contains the given pattern
-function WashGrepCount() {
-    WashGrep $* | cut -d: -f1 | sort -u |  cut -d/ -f2 | uniq -c
+function WashFindSummary() {
+    WashFind $* | cut -d: -f1 | sort -u |  cut -d/ -f2 | uniq -c
 }
 
 function WashFindClass() {
-    #WashGrep 'class\s*.*:\s*.*{' '*.h' | awk -F: '{ print $2" "$3;}' | awk '{print "Inherit: "$2 "->" $4 ": "$3; print "Subclass: "$4 "<-" $2 ":"$3; }'
-    #WashGrep 'class\s*.*:\s*.*{' '*.h' | awk -F: '{ print $2" "$3 " "$1;}' | awk '{print $2 "->" $4 ": "$3 " "$6; print $4 "<-" $2 ": "$3 " "$6; }' | sort -u
-    WashGrep 'class\s*.*:\s*.*{' '*.h' | awk -F: '{ print $2" "$3 " "$1;}' | awk '{print $2 "->" $4 ": "$3 " "$6; print $4 "<-" $2 ": "$3 " "$6; }' | sort -u
+    WashFind 'class\s*.*:\s*.*{' '*.h' | awk -F: '{ print $2" "$3 " "$1;}' | awk '{print $2 "->" $4 ": "$3 " "$6; print $4 "<-" $2 ": "$3 " "$6; }' | sort -u
 }
 
 # Find files of the given pattern
@@ -217,7 +225,7 @@ function WashFindRoutine() {
             return 0
             ;;
         include)
-			WashGrep "^#include.*\"" | cut -d: -f2 | sort -u
+			WashFind "^#include.*\"" | cut -d: -f2 | sort -u
             return $?
             ;;
         *)
@@ -237,31 +245,36 @@ function WashFindRoutine() {
     shift $[$OPTIND-1]
 
     if [ ${FLAG_INFO_GREP_SUMMARY} = true ]; then
-        WashGrepCount $1
+        WashFindSummary $1
     else
-        WashGrep $*
+        WashFind $*
     fi
 
     return $?
 }
 
 function WashOpen() {
-    return 0
+    ${WASH_EDITOR} $*
+    return $?
 }
 
 function WashWash() {
-    if [ X$1 = X"grep" -a X$2 = X"invert" ]; then
-        shift 2
-        WashGrepEdit invert "$@"
-    elif [ X$1 = X"grep" ]; then
-        WashGrepEdit "$@"
-    elif [ X$1 = X"invert" ]; then
-        WashGrepEdit "$@"
-    else
-        WashGrepEdit grep "$@"
-    fi
+    local _subcmd-$1;
+    
+    case $_subcmd in
+        file)
+            shift 1
+            WashFindEdit "$@"
+            ;;
+        invert)
+            WashEdit "$@"
+            ;;
+        *)
+            WashEdit grep "$@"
+            ;;
+    esac
 
-    return 0
+    return $?
 }
 
 function WashUsage() {
@@ -305,7 +318,10 @@ COMMAND
 
             -s                      Print count summary containing the given pattern
 
-    grep [invert] PATTERN [FILE_PATTERN]
+    file [FILE_PATTERN]
+
+        Find files containing the specified grep pattern in name to edit. 
+
     invert PATTERN [FILE_PATTERN]
     PATTERN [FILE_PATTERN]
 
@@ -314,7 +330,14 @@ COMMAND
         FILE_PATTERN specify the filename pattern to be included in search. Please quotes pattern using 
         single quotes to prevent shell path name expansion.
 
-        If invert if provided, it will search files that not contains the specified pattern to edit.
+        If invert is provided, it will search files that not contains the specified pattern to edit.
+
+    open [FILE_PATH]
+
+        Open file using GUI editor (default: Visual Studio Code)
+
+    help
+        Print this message
 
 EOF
 }
@@ -332,13 +355,18 @@ function mainloop() {
             WashCount "$@"
             return $?
             ;;
+		diff)
+			WashDiff $2 $3
+            return $?
+			;;
 		find)
             shift 1
             WashFindRoutine "$@"
             return $?
 			;;
-		diff)
-			WashDiffEdit $2 $3
+		grep)
+            shift 1
+            WashGrep "$@"
             return $?
 			;;
         help)
@@ -346,10 +374,10 @@ function mainloop() {
             return 0
             ;;
         open)
-            WashUsage
+            WashOpen "$@"
             return $?
             ;;
-		grep|invert)
+		invert)
 			;;
 		*)
 			;;
