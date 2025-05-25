@@ -26,14 +26,14 @@ WASH_EDITOR="/Applications/Visual\ Studio\ Code.app/Contents/Frameworks/Code\ He
 
 
 function WashGrep() {
-	local keyword="$1"
+    local keyword="$1"
     local extra_params=
 
     if [ X"$2" != X ]; then
         extra_params="$extra_params --include $2"
     fi
 
-	egrep -n -I $extra_params -e "$keyword" -r . | egrep -v "$EXCLUDE_PATTERN"
+    egrep -n -I $extra_params -e "$keyword" -r . | egrep -v "$EXCLUDE_PATTERN"
 }
 
 # Count lines in the given directory
@@ -63,7 +63,7 @@ function WashDiff() {
 
     for line in $(diff -r $dir_left $dir_right | egrep "^diff" | awk '{ print $3 "===" $4; }');
     do
-	    vimdiff `echo $line | awk -F'===' '{ print $1" "$2;}'`
+        vimdiff `echo $line | awk -F'===' '{ print $1" "$2;}'`
 
         _continue_edit=yes
         while true
@@ -94,7 +94,7 @@ function WashDiff() {
 
 function WashEdit() {
     local grep_type=$1
-	local keyword="$2"
+    local keyword="$2"
     local extra_params=
 
     if [ X$grep_type = X"invert" ]; then
@@ -116,7 +116,7 @@ A file-name glob can use *, ?, and [...]  as wildcards, and \ to quote a wildcar
 EOF
         fi
     else
-	    vim `egrep -I $extra_params -e "$keyword" -r . | egrep -v "$EXCLUDE_PATTERN" | sort -u`  -o
+        vim `egrep -I $extra_params -e "$keyword" -r . | egrep -v "$EXCLUDE_PATTERN" | sort -u`  -o
     fi
 }
 
@@ -136,20 +136,20 @@ function WashFindClass() {
 
 # Find files of the given pattern
 function WashFindFile() {
-	local _pattern="$1"
-	local _directory=$2
+    local _pattern="$1"
+    local _directory=$2
 
     if [ -z "$_directory" ]; then
         _directory=.
     fi
 
-	find $_directory -name "$_pattern"
+    find $_directory -name "$_pattern"
     return $?
 }
 
 function WashFindEdit() {
-	file="$1"
-	vim `find . -name "$file"` -o
+    file="$1"
+    vim `find . -name "$file"` -o
 }
 
 # Find lines 
@@ -225,7 +225,7 @@ function WashFindRoutine() {
             return 0
             ;;
         include)
-			WashFind "^#include.*\"" | cut -d: -f2 | sort -u
+            WashFind "^#include.*\"" | cut -d: -f2 | sort -u
             return $?
             ;;
         *)
@@ -239,7 +239,7 @@ function WashFindRoutine() {
                 FLAG_INFO_GREP_SUMMARY=true
                 ;;
             *)
-			    ;;
+                ;;
         esac
     done
     shift $[$OPTIND-1]
@@ -247,7 +247,7 @@ function WashFindRoutine() {
     if [ ${FLAG_INFO_GREP_SUMMARY} = true ]; then
         WashFindSummary $1
     else
-        WashFind $*
+        WashFind "$@"
     fi
 
     return $?
@@ -280,7 +280,7 @@ function WashWash() {
 function WashUsage() {
     cat  <<-EOF
 
-$(basename $0) - Wash wash sleep
+$(basename $0) - Wash Wash Sleep
  
 USAGE
 
@@ -290,33 +290,42 @@ COMMAND
 
     count
 
-        Count total lines under current directory
+        Counts the total number of lines in all files within the current directory and its 
+        subdirectories.
 
     diff dir1 dir2
 
-        Edit all diff files in dir1 and dir2 one by one
+        Opens and allows editing of all differing files found between dir1 and dir2, one by one.
 
     find [SUBCOMMAND]
 
-        Find files with specified filename pattern to edit
+        Search files based on specified criteria.
 
-        class [DIRECTORY]           List all classes declared in files of the current directory
+        class [DIRECTORY]           Lists all classes declared in the source files located in the
+                                    specified DIRECTORY (defaults to current if not provided). 
 
-        import(TBD)                 Print the list of imported files
+        import(TBD)                 Displays a list of all imported files/modules.
 
-        include                     Print the list of included files 
+        include                     Displays a list of all included files/modules.
 
-        long [WIDTH] [DIRECTORY]    Find lines longer than the specified WIDTH and DIRECTORY
+        long [WIDTH] [DIRECTORY]    Identifies and lists lines with a length greater than the
+                                    specified WIDTH. The search is conducted within the files of the
+                                    DIRECTORY (defaults to current if not provided).
 
-        orphan(TBD)                 Find orphan files those that are not linked or referenced by others
+        orphan(TBD)                 Locates and lists orphan files that are not linked or referenced
+                                    by other files within the project
 
-        unused [edit](TBD)          Find unused import symbols. If edit is provided, open files one by one and highlight the unused imports
+        unused [edit](TBD)          Identifies and lists unused import symbols. If the edit option 
+                                    is provided, it opens the relevant files one by one and
+                                    highlights the unused imports.
 
-        file [PATTERN]              Find files of the specified name pattern
+        file [PATTERN]              Finds and lists files whose names match the specified PATTERN.
 
-	    [PATTERN]                   Find files containing the specified pattern
+        [-s] [PATTERN]              Finds and lists files containing the specified text PATTERN
+                                    within their content.
 
-            -s                      Print count summary containing the given pattern
+            -s                      When used with find [PATTERN], prints a summary count of
+                                    occurrences for the given pattern.
 
     file [FILE_PATTERN]
 
@@ -325,50 +334,52 @@ COMMAND
     invert PATTERN [FILE_PATTERN]
     PATTERN [FILE_PATTERN]
 
-        Find files containing the specified grep pattern to edit. 
+        Searches for files containing the specified text PATTERN to review or edit.
 
-        FILE_PATTERN specify the filename pattern to be included in search. Please quotes pattern using 
-        single quotes to prevent shell path name expansion.
+        FILE_PATTERN allows you to specify a filename pattern to include in the search. Please use
+        single quotes around patterns (e.g., '*.py') to prevent shell expansion.
 
-        If invert is provided, it will search files that not contains the specified pattern to edit.
+        When used with invert, searches for files that do not contain the specified PATTERN.
 
     open [FILE_PATH]
 
-        Open file using GUI editor (default: Visual Studio Code)
+        Opens the specified FILE_PATH using the default graphical user interface (GUI) editor
+        (e.g., Visual Studio Code).
 
     help
-        Print this message
+
+        Displays this help message.
 
 EOF
 }
 
 function mainloop() {
-	COMMAND=$1
+    COMMAND=$1
     if [ -z "$COMMAND" ]; then
         WashUsage
         return 0
     fi
 
-	case $COMMAND in
+    case $COMMAND in
         count)
             shift 1
             WashCount "$@"
             return $?
             ;;
-		diff)
-			WashDiff $2 $3
+        diff)
+            WashDiff $2 $3
             return $?
-			;;
-		find)
+            ;;
+        find)
             shift 1
             WashFindRoutine "$@"
             return $?
-			;;
-		grep)
+            ;;
+        grep)
             shift 1
             WashGrep "$@"
             return $?
-			;;
+            ;;
         help)
             WashUsage
             return 0
@@ -377,11 +388,11 @@ function mainloop() {
             WashOpen "$@"
             return $?
             ;;
-		invert)
-			;;
-		*)
-			;;
-	esac
+        invert)
+            ;;
+        *)
+            ;;
+    esac
 
     while getopts h opt
     do
@@ -389,13 +400,13 @@ function mainloop() {
             h|*)
                 WashUsage
                 return 1
-			    ;;
+                ;;
         esac
     done
     shift $[$OPTIND-1]
 
     WashWash "$@"
-	return $?
+    return $?
 }
 
 
